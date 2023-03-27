@@ -28,7 +28,7 @@ const octokit = new Octokit({
 
 async function getRepositoriesFromBitBucket() {
   console.log(`Searching for repositories in the workspace ${bbWorkspace}...`);
-  const { data } = await bitbucket.repositories.list({ workspace: bbWorkspace, page: '1', pagelen: 2 }); // retorna paginado, por isso o page
+  const { data } = await bitbucket.repositories.list({ workspace: bbWorkspace, page: '1', pagelen: 5 }); // retorna paginado, por isso o page
 
   if (!data?.values?.length) {
     return console.log('No repositories found');
@@ -102,11 +102,16 @@ async function createRepo({ repositoryName, projectName, defaultBranch }) {
 
   console.log(`Creating repository ${newRepositoryName} on GitHub...`);
 
-  await octokit.repos.createForAuthenticatedUser({
-    name: newRepositoryName,
-    private: true,
-    default_branch: defaultBranch
-  });
+  try {
+    await octokit.repos.createForAuthenticatedUser({
+      name: newRepositoryName,
+      private: true,
+      default_branch: defaultBranch
+    });
+  } catch (error) {
+    console.log(`Error creating repository ${newRepositoryName} on GitHub: ${error.message}`);
+    return null;
+  }
 
   //disable actions
   await octokit.request('PUT /repos/{owner}/{repo}/actions/permissions', {
@@ -243,6 +248,11 @@ async function handler() {
           projectName: repository.projectName,
           defaultBranch: repository.defaultBranch
         });
+      }
+
+      if (!newRepository) {
+        console.log(`Skipping repository ${repository.name}...`);
+        continue;
       }
 
       const importResponse = await importToGitHub({
