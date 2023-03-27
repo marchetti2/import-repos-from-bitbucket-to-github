@@ -199,7 +199,7 @@ async function importPullRequests({ repositoryName, newRepository }) {
 
   //enable actions
   await octokit.request('PUT /repos/{owner}/{repo}/actions/permissions', {
-    owner: ghOrg,
+    owner,
     enabled: true,
     repo: newRepository,
   });
@@ -222,7 +222,7 @@ async function setDefaultBranch({ repositoryName, defaultBranch }) {
 
 async function handler() {
   console.log('---------------------------------');
-  console.log('Iniciando...');
+  console.log('Starting...');
 
   try {
     const repositories = await getRepositoriesFromBitBucket();
