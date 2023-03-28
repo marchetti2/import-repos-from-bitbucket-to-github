@@ -28,7 +28,7 @@ const octokit = new Octokit({
 
 async function getRepositoriesFromBitBucket() {
   console.log(`Searching for repositories in the workspace ${bbWorkspace}...`);
-  const { data } = await bitbucket.repositories.list({ workspace: bbWorkspace, page: '1', pagelen: 5 }); // retorna paginado, por isso o page
+  const { data } = await bitbucket.repositories.list({ workspace: bbWorkspace, page: '2', pagelen: 1 });
 
   if (!data?.values?.length) {
     return console.log('No repositories found');
@@ -36,9 +36,10 @@ async function getRepositoriesFromBitBucket() {
 
   const repositories = data.values.map(repository => {
     return {
-      name: repository.name,
+      repositoryName: repository.name,
       defaultBranch: repository.mainbranch?.name,
-      projectName: repository.project?.name
+      projectName: repository.project?.name,
+      description: repository.description
     }
   });
 
@@ -47,16 +48,17 @@ async function getRepositoriesFromBitBucket() {
   return repositories;
 }
 
-async function createRepoInOrg({ repositoryName, projectName, defaultBranch }) {
+async function createRepoInOrg({ repository }) {
+
+  const {repositoryName, projectName, defaultBranch, description} = repository;
 
   const targetTeamName = ghTeam;
+  const topic = projectName ? projectName.toLowerCase() : null;
 
-  const formattedRepositoryName = repositoryName.replace(/_/g, '-')
+  const newRepositoryName = repositoryName.replace(/_/g, '-')
     .split(/(?=[A-Z])/)
     .map(s => s.toLowerCase())
     .join('-')
-
-  const newRepositoryName = projectName ? `${projectName.toUpperCase()}-${formattedRepositoryName}` : formattedRepositoryName;
 
   console.log(`Creating repository ${newRepositoryName} on GitHub...`);
 
@@ -64,7 +66,8 @@ async function createRepoInOrg({ repositoryName, projectName, defaultBranch }) {
     org: ghOrg,
     name: newRepositoryName,
     private: true,
-    default_branch: defaultBranch
+    default_branch: defaultBranch, 
+    description
   });
 
   //add admin permission to team
@@ -87,18 +90,29 @@ async function createRepoInOrg({ repositoryName, projectName, defaultBranch }) {
   });
   console.log(`Actions disabled on repository ${newRepositoryName}`);
 
+  await octokit.request('PUT /repos/{owner}/{repo}/topics', {
+    owner: ghUsername,
+    repo: newRepositoryName,
+    names: [topic]
+  });
+
+  console.log(`Added topic ${topic} to repository ${newRepositoryName}`);
+
   console.log(`Repository successfully created!`);
   return newRepositoryName;
 }
 
-async function createRepo({ repositoryName, projectName, defaultBranch }) {
+async function createRepo({ repository }) {
 
-  const formattedRepositoryName = repositoryName.replace(/_/g, '-')
+  const {repositoryName, projectName, defaultBranch, description} = repository;
+  console.log(repositoryName, projectName, defaultBranch, description);
+
+  const topic = projectName ? projectName.toLowerCase() : null;
+
+  const newRepositoryName = repositoryName.replace(/_/g, '-')
     .split(/(?=[A-Z])/)
     .map(s => s.toLowerCase())
     .join('-')
-
-  const newRepositoryName = projectName ? `${projectName.toUpperCase()}-${formattedRepositoryName}` : formattedRepositoryName;
 
   console.log(`Creating repository ${newRepositoryName} on GitHub...`);
 
@@ -106,7 +120,8 @@ async function createRepo({ repositoryName, projectName, defaultBranch }) {
     await octokit.repos.createForAuthenticatedUser({
       name: newRepositoryName,
       private: true,
-      default_branch: defaultBranch
+      default_branch: defaultBranch,
+      description
     });
   } catch (error) {
     console.log(`Error creating repository ${newRepositoryName} on GitHub: ${error.message}`);
@@ -119,8 +134,16 @@ async function createRepo({ repositoryName, projectName, defaultBranch }) {
     enabled: false,
     repo: newRepositoryName,
   });
-
   console.log(`Disabled actions for repository ${newRepositoryName}`);
+
+  await octokit.request('PUT /repos/{owner}/{repo}/topics', {
+    owner: ghUsername,
+    repo: newRepositoryName,
+    names: [topic]
+  });
+
+  console.log(`Added topic ${topic} to repository ${newRepositoryName}`);
+
   console.log(`Repository created successfully!`);
   return newRepositoryName;
 }
@@ -151,6 +174,11 @@ async function importToGitHub({ repositoryName, newRepository, defaultBranch }) 
 
     if (Date.now() - startTime > timeout) {
       console.log(`Timeout of ${timeout} milliseconds reached.`);
+      break;
+    }
+
+    if (importResponse.data.status === 'error') {
+      console.log(`Import failed: ${importResponse}`);
       break;
     }
   }
@@ -237,37 +265,29 @@ async function handler() {
       let newRepository = null;
 
       if (ghOrg) {
-        newRepository = await createRepoInOrg({
-          repositoryName: repository.name,
-          projectName: repository.projectName,
-          defaultBranch: repository.defaultBranch
-        });
+        newRepository = await createRepoInOrg({ repository });
       } else {
-        newRepository = await createRepo({
-          repositoryName: repository.name,
-          projectName: repository.projectName,
-          defaultBranch: repository.defaultBranch
-        });
+        newRepository = await createRepo({ repository });
       }
 
       if (!newRepository) {
-        console.log(`Skipping repository ${repository.name}...`);
+        console.log(`Skipping repository ${repository.repositoryName}...`);
         continue;
       }
 
       const importResponse = await importToGitHub({
-        repositoryName: repository.name,
+        repositoryName: repository.repositoryName,
         newRepository,
         defaultBranch: repository.defaultBranch
       });
 
       if (!importResponse) {
-        console.log(`The repository ${repository.name} has not been imported yet. Skipping pull request import...`);
+        console.log(`The repository ${repository.repositoryName} has not been imported yet. Skipping pull request import...`);
         continue;
       }
 
       await importPullRequests({
-        repositoryName: repository.name,
+        repositoryName: repository.repositoryName,
         newRepository
       });
 
