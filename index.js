@@ -28,7 +28,7 @@ const octokit = new Octokit({
 
 async function getRepositoriesFromBitBucket() {
   console.log(`Searching for repositories in the workspace ${bbWorkspace}...`);
-  const { data } = await bitbucket.repositories.list({ workspace: bbWorkspace, page: '2', pagelen: 1 });
+  const { data } = await bitbucket.repositories.list({ workspace: bbWorkspace, page: '1', pagelen: 100 });
 
   if (!data?.values?.length) {
     return console.log('No repositories found');
@@ -50,25 +50,30 @@ async function getRepositoriesFromBitBucket() {
 
 async function createRepoInOrg({ repository }) {
 
-  const {repositoryName, projectName, defaultBranch, description} = repository;
+  const { repositoryName, projectName, defaultBranch, description } = repository;
 
   const targetTeamName = ghTeam;
   const topic = projectName ? projectName.toLowerCase() : null;
 
   const newRepositoryName = repositoryName.replace(/_/g, '-')
-    .split(/(?=[A-Z])/)
+    .split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<!-)(?=[A-Z])/)
     .map(s => s.toLowerCase())
-    .join('-')
+    .join('-');
 
   console.log(`Creating repository ${newRepositoryName} on GitHub...`);
+  try {
+    await octokit.repos.createInOrg({
+      org: ghOrg,
+      name: newRepositoryName,
+      private: true,
+      default_branch: defaultBranch,
+      description
+    });
 
-  await octokit.repos.createInOrg({
-    org: ghOrg,
-    name: newRepositoryName,
-    private: true,
-    default_branch: defaultBranch, 
-    description
-  });
+  } catch (error) {
+    console.log(`Error creating repository ${newRepositoryName} on GitHub: ${error.message}`);
+    return null;
+  }
 
   //add admin permission to team
   if (targetTeamName) {
@@ -91,7 +96,7 @@ async function createRepoInOrg({ repository }) {
   console.log(`Actions disabled on repository ${newRepositoryName}`);
 
   await octokit.request('PUT /repos/{owner}/{repo}/topics', {
-    owner: ghUsername,
+    owner: ghOrg,
     repo: newRepositoryName,
     names: [topic]
   });
@@ -104,15 +109,15 @@ async function createRepoInOrg({ repository }) {
 
 async function createRepo({ repository }) {
 
-  const {repositoryName, projectName, defaultBranch, description} = repository;
+  const { repositoryName, projectName, defaultBranch, description } = repository;
   console.log(repositoryName, projectName, defaultBranch, description);
 
   const topic = projectName ? projectName.toLowerCase() : null;
 
   const newRepositoryName = repositoryName.replace(/_/g, '-')
-    .split(/(?=[A-Z])/)
+    .split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<!-)(?=[A-Z])/)
     .map(s => s.toLowerCase())
-    .join('-')
+    .join('-');
 
   console.log(`Creating repository ${newRepositoryName} on GitHub...`);
 
